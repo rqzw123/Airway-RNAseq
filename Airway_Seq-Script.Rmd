@@ -1,0 +1,295 @@
+---
+title: "airway_rnaseq"
+author: "Reuben Quek"
+date: "2026-09-09"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Airway RNAseq Analysis
+
+Bulk RNA-seq was performed on four human airway smooth muscle (ASM) cell lines under two conditions: [**untreated**]{.underline} & [**treated**]{.underline} (with dexamethasone). The goal of this analysis is to assess the [**transcriptional response**]{.underline} of ASM cells to synthetic glucocorticoid exposure. ([GEO: GSE52778]{.underline})
+
+Utilising the `DESeq2` framework, quality control of the datasets are performed, differentially-expressed genes were identified, and downstream pathway enrichment analysis was conducted to identify functional changes and biological themes underlying the phenotype.
+
+## Loading Libraries
+
+Load the packages required to run the DESeq analysis.
+
+```{r}
+suppressPackageStartupMessages({
+  library(org.Hs.eg.db)
+  library(AnnotationDbi)
+  library(DESeq2)
+  library(tidyverse)
+  library(RColorBrewer)
+  library(pheatmap)
+  library(ggplot2)
+  library(EnhancedVolcano)
+})
+
+```
+
+### Loading Data
+
+Load the counts, coldata (metadata), and rowdata (gene annotation) as data frames.
+
+```{r}
+countsdata <- read.csv("data/counts_data.csv")
+head(countsdata)
+```
+
+```{r}
+coldata <- read.csv("data/sample_info.csv")
+head(coldata)
+```
+
+```{r}
+rowdata <- read.csv("data/row_data.csv")
+head(rowdata)
+```
+
+### Constructing DESeq Object
+
+Before creating the DESeq object for analysis, first check that the sample names align for:
+
+- column names of `countsdata`, row names of `coldata`
+
+- row names of `rowdata` and `countsdata`
+
+```{r}
+# same name and order
+all(rownames(coldata) == colnames(countsdata))
+all(rownames(rowdata) == rownames(countsdata))
+```
+
+```{r}
+dds <- DESeqDataSetFromMatrix(
+  countData=countsdata,
+  colData=coldata,
+  rowData=rowdata,
+  design=~cellLine+dexamethasone 
+  )
+```
+
+Next, the factors are re-levelled before running analysis ("treated" comes before "untreated" alphabetically, which will mess up the baseline).
+
+```{r}
+colData(dds)$dexamethasone <- relevel(colData(dds)$dexamethasone, ref = "untreated")
+```
+
+### Exploratory Analysis / Quality Control
+
+First, filter out the genes with an insufficient count, setting the minimum count to [**10**]{.underline}.
+
+```{r}
+nrow(dds) # prints out initial number of rows 
+```
+
+```{r}
+keep <- rowSums(counts(dds)) >= 10 # boolean logic, used to subset
+dds <- dds[keep, ]
+nrow(dds)
+```
+
+#### Clustering Heatmap
+
+Use DESeq's [variance stabilising transform]{.underline} (VST) before performing QC.
+
+```{r}
+vsd <- vst(dds, blind=TRUE)
+```
+
+Next, extract the counts of the variance-transformed data (vsd), and `cor()` is used to compute the correlation coefficient (Pearson's r) to compare the expression profiles of the various samples.
+
+```{r heatmap-qc, fig.path="fig_output/", dev="png", fig.width=8, fig.height=8}
+vsd_mat <- assay(vsd)
+vsd_cor <- cor(vsd_mat)
+
+pheatmap(vsd_cor, 
+         annotation = coldata["dexamethasone"])
+```
+
+Sample-to-sample correlation shows high overall concordance ($r > 0.975$) and no apparent outliers. Hierarchical clustering cleanly separates samples by treatment condition (dexamethasone-treated vs. untreated). Coordinated sub-clustering among matched samples reflects the donor cell line effect, confirming that `cell` should be included as a blocking factor in the `DESeq2` design formula (`~ cell + dexamethasone`).
+
+#### Principal Component Analysis (PCA)
+
+Next, plot the PCA to view the clustering of the various samples.
+
+```{r pca-qc, fig.path="fig_output/", dev="png", fig.width=8, fig.height=5}
+pca_data <- plotPCA(
+  vsd,
+  intgroup=c("dexamethasone", "cellLine"),
+  returnData=TRUE
+)
+
+percentVar <- round(100*attr(pca_data, "percentVar")) # names(attributes(pca_data)) to access attributes
+
+ggplot(pca_data, aes(x=PC1, y=PC2, color=dexamethasone, shape=cellLine)) +
+  geom_point(size=4) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_bw() +
+  ggtitle("PCA: Dexamethasone & Cell Line Effects") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+PC1 (41% variance) separates treatment, which confirms dexamethasone as the primary driver of transcriptional change. PC2 (26% variance) reflects the cell line differences: paired samples from the same donor share similar vertical positions along PC2.
+
+### Run DESeq Analysis
+
+```{r}
+dds <- DESeq(dds)
+res <- results(
+  object=dds,
+  contrast=c("dexamethasone", "treated", "untreated"),
+  alpha=0.05
+)
+summary(res)
+```
+
+```{r}
+plotMA(res)
+```
+
+```{r}
+res_shrunk <- lfcShrink(
+  dds,
+  coef="dexamethasone_treated_vs_untreated",
+  res=res
+)
+```
+
+```{r}
+plotMA(res_shrunk)
+summary(res_shrunk)
+head(res_shrunk)
+```
+
+Next, the shrunken results will be converted into a data frame, and using rowData of dds, transfer the corresponding gene `symbols` and `gene_biotype` to `res_df`.
+
+```{r}
+# convert the results object to a standard data frame
+res_df <- as.data.frame(res_shrunk)
+
+# add the gene symbol and gene_biotype to res_df
+symbol <- rowData(dds)$gene_name[match(rownames(res_df), rownames(dds))]
+res_df$symbol <- symbol
+
+biotype <- rowData(dds)$gene_biotype[match(rownames(res_df), rownames(dds))]
+res_df$gene_biotype <- biotype
+```
+
+Next, the DEGs from `res_df` will be filtered out (padj \< 0.05), and then arranged based on the padj value:
+
+```{r}
+degs <- res_df |> 
+  filter(!is.na(padj), padj < 0.05) |> 
+  arrange(padj)
+
+head(degs)
+```
+
+Next, the top 30 DE genes will be extracted to build an annotated heatmap, constructed using the vsd data subsetted to the top 30 genes.
+
+```{r top30-heatmap, fig.path="fig_output/", dev="png", fig.height=10, fig.width=8}
+# grab the Ensembl IDs to subset the matrix (since vsd uses Ensembl IDs)
+top_genes <- rownames(degs)[1:min(30, nrow(degs))] # in case < 30 DE genes
+mat <- vsd_mat[top_genes, ]
+
+# grab the corresponding gene symbols
+top_symbols <- degs$symbol[1:min(30, nrow(degs))]
+
+# safety check: If a gene doesn't have a symbol, keep its Ensembl ID so it isn't NA
+top_symbols <- ifelse(is.na(top_symbols), top_genes, top_symbols)
+
+# swap the row names from Ensembl ID to symbols
+rownames(mat) <- top_symbols
+
+pheatmap(
+  mat,
+  scale = "row", # calculates Z-score across each row
+  color=brewer.pal(7, "PuRd"),
+  annotation_col = dplyr::select(coldata, dexamethasone),
+  show_rownames = TRUE, # This will now display top_symbols
+  cluster_cols = TRUE,
+  cluster_rows = TRUE,
+  main="Heatmap: Top 30 DE Genes in ASM Treated vs Untreated"
+)
+```
+
+#### Volcano Plot
+
+A volcano plot will be plotted to visualise the differentially expressed genes between the various treatment conditions.
+
+```{r volcanoplot, fig.path="fig_output/", dev="png", fig.height=8, fig.width=8}
+EnhancedVolcano(
+  res_df,
+  lab=res_df$symbol,
+  x="log2FoldChange",
+  y="padj",
+  labSize=4.5,
+  legendLabels=c(
+    "ns",
+    "|Log2FC| > 1",
+    "p-adj < 0.05",
+    "p-adj < 0.05 & |Log2FC| > 1"),
+  title="Dexamethasone-Treated vs. Untreated ASM Cells",
+  legendIconSize=3,
+  legendLabSize=12,
+  subtitle="",
+  drawConnectors=TRUE,
+  pointSize=1.5
+  )
+```
+
+### Gene Set Enrichment Analysis (GSEA)
+
+```{r}
+suppressPackageStartupMessages({
+  library(clusterProfiler)
+  library(enrichplot)
+})
+
+```
+
+```{r}
+# Extract significant Ensembl IDs
+sig_genes <- rownames(degs)
+
+# Convert Ensembl IDs to Entrez IDs
+entrez_ids <- mapIds(org.Hs.eg.db,
+                     keys = sig_genes,
+                     column = "ENTREZID",
+                     keytype = "ENSEMBL",
+                     multiVals = "first")
+
+# Remove NAs from failed mappings
+entrez_ids <- na.omit(entrez_ids)
+```
+
+```{r}
+# Run GO Enrichment Analysis
+ego <- enrichGO(gene          = entrez_ids,
+                OrgDb         = org.Hs.eg.db,
+                ont           = "BP", # Focuses on Biological Processes
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05,
+                qvalueCutoff  = 0.05,
+                readable      = TRUE) # Maps Entrez back to symbols for clean plots
+```
+
+```{r enrichBP, fig.path="fig_output/", dev="png", fig.height=8, fig.width=8}
+# Generate a dotplot of the top enriched pathways
+dotplot(ego, showCategory = 15) + 
+  ggtitle("Top 15 Enriched Biological Processes") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Conclusions / Discussions
+
+The exploratory sample-level analyses—spanning sample distance clustering and principal component analysis—demonstrate robust data quality with high replicate concordance and no outlier samples. The primary axis of variation corresponds directly to treatment status, while secondary clustering reflects cell line-specific differences. Together, these diagnostic checks validate the integrity of the count data and confirm that a paired design formula (`~ cell + dexamethasone`) is appropriate for controlling biological background variation in downstream differential expression testing.
