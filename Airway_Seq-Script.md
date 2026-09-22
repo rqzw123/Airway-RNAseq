@@ -291,7 +291,7 @@ summary(res)
 plotMA(res)
 ```
 
-![](Airway_Seq-Script_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+![](fig_output/plotMA_beforeshrink-1.png)<!-- -->
 
 ``` r
 res_shrunk <- lfcShrink(
@@ -310,7 +310,7 @@ res_shrunk <- lfcShrink(
 plotMA(res_shrunk)
 ```
 
-![](Airway_Seq-Script_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+![](fig_output/plotMA_aftershrink-1.png)<!-- -->
 
 ``` r
 summary(res_shrunk)

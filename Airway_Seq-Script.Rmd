@@ -152,7 +152,7 @@ res <- results(
 summary(res)
 ```
 
-```{r}
+```{r plotMA_beforeshrink, fig.path="fig_output/", dev="png", fig.width=8, fig.height=5}
 plotMA(res)
 ```
 
@@ -164,7 +164,7 @@ res_shrunk <- lfcShrink(
 )
 ```
 
-```{r}
+```{r plotMA_aftershrink, fig.path="fig_output/", dev="png", fig.width=8, fig.height=5}
 plotMA(res_shrunk)
 summary(res_shrunk)
 head(res_shrunk)
