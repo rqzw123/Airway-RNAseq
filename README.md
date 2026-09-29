@@ -6,7 +6,7 @@ This repository contains code (in R) to evaluate the effects of synthetic glucoc
 
 - **Objective**: The goal of the analysis is to assess the transcriptional response of human airway smooth muscle (ASM) cells to synthetic glucocorticoid exposure.
 
-- **Experimental Design**: Bulk RNA-seq was performed on four human ASM cell lines under 2 conditions: [untreated]{.underline} and [treated with dexamethasone]{.underline}.
+- **Experimental Design**: Bulk RNA-seq was performed on four human ASM cell lines under 2 conditions: *untreated* and treated with *dexamethasone*.
 
 - **Data Source**: GEO accession number [GSE52778](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE52778)
 
