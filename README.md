@@ -10,6 +10,8 @@ This repository contains code (in R) to evaluate the effects of synthetic glucoc
 
 - **Data Source**: GEO accession number [GSE52778](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE52778)
 
+(note that the full GEO dataset contains other treatment arms such as `albuterol` and `dexamethasone+albuterol`, but dexamethasone will be the focus for this analysis.)
+
 ## Workflow
 
 The core analysis pipeline is documented in Airway_Seq-Script.md and performs the following steps:
@@ -36,8 +38,9 @@ To run the script successfully, ensure that the following R packages are install
 
 - `org.Hs.eg.db` and `AnnotationDbi`
 
-## Key Conclusions 
+## Key Conclusions
 
-- Exploratory analyses confirm robust data quality with high replicate concordance and no outlier samples.
-
-- The primary source of variation is driven largely by treatment status (*dexamethasone vs untreated*).
+- Secondary clustering reflects donor-specific differences, confirming the necessity of a paired design formula (`~ cellLine + dexamethasone`) to effectively control for biological background variation.
+- Applying log2 fold change shrinkage (`apeglm`) successfully mitigated statistical noise from low-count transcripts, ensuring that downstream pathway analysis was driven by true biological signals rather than mathematical artifacts.
+- Over-Representation Analysis (ORA) revealed that dexamethasone strongly upregulates networks associated with cytoskeletal organisation, cell-substrate adhesion, and metabolic shifts (e.g., insulin response).
+- Conversely, downregulated gene signatures were heavily enriched in broad developmental and extracellular matrix-related pathways, capturing the pervasive suppressive effects of glucocorticoids on cellular proliferation and off-target signaling.

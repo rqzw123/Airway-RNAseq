@@ -1,4 +1,5 @@
-# script to get data from airway package
+# script to get data from airway package from Bioconductor
+# code is slightly modified from bioinformagician
 
 library(airway)
 

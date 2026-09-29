@@ -9,7 +9,8 @@ Bulk RNA-seq was performed on four human airway smooth muscle (ASM) cell
 lines under two conditions: <u>**untreated**</u> & <u>**treated**</u>
 (with dexamethasone). The goal of this analysis is to assess the
 <u>**transcriptional response**</u> of ASM cells to synthetic
-glucocorticoid exposure. (<u>GEO: GSE52778</u>)
+glucocorticoid exposure. [<u>GEO:
+GSE52778</u>](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE52778)
 
 Utilising the `DESeq2` framework, quality control of the datasets are
 performed, differentially-expressed genes were identified, and
@@ -151,7 +152,7 @@ dds <- DESeqDataSetFromMatrix(
   countData=countsdata,
   colData=coldata,
   rowData=rowdata,
-  design=~cellLine+dexamethasone 
+  design=~cellLine+dexamethasone # test for effects of treatment, while accounting for cell line differences
   )
 ```
 
@@ -287,6 +288,10 @@ summary(res)
     ## [1] see 'cooksCutoff' argument of ?results
     ## [2] see 'independentFiltering' argument of ?results
 
+Next, `plotMA()` is used before and after log2 fold change (LFC)
+shrinkage to visualize how the shrinkage algorithm suppresses the noisy,
+exaggerated fold changes typically seen in low-count genes.
+
 ``` r
 plotMA(res)
 ```
@@ -416,6 +421,11 @@ pheatmap(
 
 ![](fig_output/top30-heatmap-1.png)<!-- -->
 
+``` r
+# write the top 30 DEGs into a table:
+write_csv(head(degs, 30), "fig_output/top30DEGs.csv")
+```
+
 #### Volcano Plot
 
 A volcano plot will be plotted to visualise the differentially expressed
@@ -460,7 +470,14 @@ EnhancedVolcano(
 
 ![](fig_output/volcanoplot-1.png)<!-- -->
 
-### Gene Set Enrichment Analysis (GSEA)
+### Over-Representation Analysis (ORA)
+
+To identify the biological themes driven by dexamethasone treatment, we
+perform Over-Representation Analysis (ORA) on the differentially
+expressed genes. The significant genes (padj \< 0.05) are split into
+upregulated and downregulated subsets to isolate distinct functional
+responses, mapping their Ensembl IDs to Entrez IDs before querying the
+GO Biological Processes database.
 
 ``` r
 suppressPackageStartupMessages({
@@ -474,47 +491,84 @@ suppressPackageStartupMessages({
     ## Warning: package 'enrichplot' was built under R version 4.5.2
 
 ``` r
-# Extract significant Ensembl IDs
-sig_genes <- rownames(degs)
+# Extract significant upregulated and downregulated Ensembl IDs
+up_genes <- degs |> 
+  filter(log2FoldChange > 0) |> 
+  rownames()
+down_genes <- degs |> 
+  filter(log2FoldChange < 0) |> 
+  rownames()
 
 # Convert Ensembl IDs to Entrez IDs
-entrez_ids <- mapIds(org.Hs.eg.db,
-                     keys = sig_genes,
-                     column = "ENTREZID",
-                     keytype = "ENSEMBL",
-                     multiVals = "first")
+up_entrez <- mapIds(org.Hs.eg.db, keys = up_genes, column = "ENTREZID", keytype = "ENSEMBL", multiVals = "first")
+```
+
+    ## 'select()' returned 1:many mapping between keys and columns
+
+``` r
+down_entrez <- mapIds(org.Hs.eg.db, keys = down_genes, column = "ENTREZID", keytype = "ENSEMBL", multiVals = "first")
 ```
 
     ## 'select()' returned 1:many mapping between keys and columns
 
 ``` r
 # Remove NAs from failed mappings
-entrez_ids <- na.omit(entrez_ids)
+up_entrez <- na.omit(up_entrez)
+down_entrez <- na.omit(down_entrez)
 ```
 
 ``` r
-# Run GO Enrichment Analysis
-ego <- enrichGO(gene          = entrez_ids,
-                OrgDb         = org.Hs.eg.db,
-                ont           = "BP", # Focuses on Biological Processes
-                pAdjustMethod = "BH",
-                pvalueCutoff  = 0.05,
-                qvalueCutoff  = 0.05,
-                readable      = TRUE) # Maps Entrez back to symbols for clean plots
+# Run GO Enrichment Analysis independently for both lists
+ego_up <- enrichGO(
+  gene          = up_entrez,
+  OrgDb         = org.Hs.eg.db,
+  ont           = "BP", 
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.05,
+  readable      = TRUE
+)
+
+ego_down <- enrichGO(
+  gene          = down_entrez,
+  OrgDb         = org.Hs.eg.db,
+  ont           = "BP", 
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.05,
+  readable      = TRUE
+)
 ```
 
 ``` r
-# Generate a dotplot of the top enriched pathways
-dotplot(ego, showCategory = 15) + 
-  ggtitle("Top 15 Enriched Biological Processes") +
+# Generate dotplots of the top enriched pathways
+dotplot(ego_up, showCategory = 15) + 
+  ggtitle("Top 15 Enriched Biological Processes (Upregulated)") +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-![](fig_output/enrichBP-1.png)<!-- -->
+![](fig_output/enrichBP-up-1.png)<!-- -->
+
+``` r
+dotplot(ego_down, showCategory = 15) + 
+  ggtitle("Top 15 Enriched Biological Processes (Downregulated)") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+![](fig_output/enrichBP-down-1.png)<!-- -->
+
+The GO enrichment showed that upregulated genes were mainly associated
+with cytoskeletal organisation, cell adhesion, and cellular
+stress/metabolic responses, reflecting the known role of glucocorticoids
+in driving structural airway remodeling and metabolic shifts.
+Conversely, downregulated genes were enriched in broad developmental and
+extracellular matrix-related processes, which may capture the broad
+suppressive nature of dexamethasone on cellular proliferation and
+off-target signaling cascades.
 
 ### Conclusions / Discussions
 
-The exploratory sample-level analyses—spanning sample distance
+The exploratory sample-level analyses, which spanned sample distance
 clustering and principal component analysis—demonstrate robust data
 quality with high replicate concordance and no outlier samples. The
 primary axis of variation corresponds directly to treatment status,
@@ -523,3 +577,14 @@ Together, these diagnostic checks validate the integrity of the count
 data and confirm that a paired design formula (`~ cell + dexamethasone`)
 is appropriate for controlling biological background variation in
 downstream differential expression testing.
+
+Building on this robust model, differential expression analysis
+successfully isolated the transcriptional signature of synthetic
+glucocorticoid exposure. The application of LFC shrinkage mitigated
+noise from low-count transcripts, revealing distinct functional
+divergence. Upregulated networks highlight dexamethasone’s induction of
+metabolic and cytoskeletal remodeling in airway smooth muscle cells,
+while the downregulated networks capture sweeping suppression of
+developmental and extracellular matrix pathways. Ultimately, this
+pipeline effectively bridges robust statistical modeling with clear
+biological pathway resolution.
